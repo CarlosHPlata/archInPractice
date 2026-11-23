@@ -1,0 +1,21 @@
+# Traefik static configuration (read once, when the gateway starts).
+# After changing this file: docker compose restart gateway
+
+entryPoints:
+  web:
+    address: ":8080"   # public entry point of the store
+  ping:
+    address: ":8082"   # only used by the container healthcheck
+
+ping:
+  entryPoint: ping
+
+providers:
+  file:
+    filename: /etc/traefik/routes.yml
+
+log:
+  level: INFO
+
+accessLog:
+  format: json

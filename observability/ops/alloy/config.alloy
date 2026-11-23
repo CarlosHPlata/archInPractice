@@ -1,0 +1,80 @@
+// Grafana Alloy does two jobs in this stack:
+//   1. logs:   reads the stdout of the containers and ships it to Loki
+//   2. traces: receives OTLP from the gateway and the services, forwards to Tempo
+
+// ---------- 1. logs ----------
+
+// Find the containers of this compose project through the Docker API.
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s" // the services start after Alloy: find them quickly
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=otzzo"]
+  }
+}
+
+// Keep the store's own containers and label each log stream with the compose
+// service name. Nothing else becomes a label: fields such as trace_id stay
+// inside the log line and are queried with "| json".
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "gateway|orders|cart|customers"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ---------- 2. traces ----------
+
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  timeout = "1s"
+
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    tls {
+      insecure = true
+    }
+  }
+}

@@ -1,0 +1,165 @@
+# Otzzo: the store (projects/) and the tools that run and observe it (ops/).
+# Start everything with:  docker compose up --build
+name: otzzo
+
+services:
+  # ---------------- the gateway (ops/gateway) ----------------
+
+  gateway:
+    image: traefik:v3.7.19
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./ops/gateway:/etc/traefik:ro
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--configFile=/etc/traefik/traefik.yml"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      orders: { condition: service_healthy }
+
+  # ---------------- the services (projects/) ----------------
+
+  orders:
+    build: ./projects/orders
+    environment:
+      CART_URL: http://cart:8080
+      CUSTOMERS_URL: http://customers:8000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      cart: { condition: service_healthy }
+      customers: { condition: service_healthy }
+      alloy: { condition: service_healthy }
+
+  cart:
+    build: ./projects/cart
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD", "/cart", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      alloy: { condition: service_healthy }
+
+  customers:
+    build: ./projects/customers
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+    mem_limit: 160m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      alloy: { condition: service_healthy }
+
+  # Customers of the shop: sends a few random orders every few seconds, forever.
+  # Pause it with: docker compose stop traffic
+  traffic:
+    image: curlimages/curl:8.23.0
+    entrypoint: ["sh", "/traffic/generate-request.sh"]
+    environment:
+      ORDERS_URL: http://gateway:8080/orders
+      INTERVAL: "3"
+      MAX_BURST: "4"
+    volumes:
+      - ./ops/traffic:/traffic:ro
+    mem_limit: 32m
+    restart: unless-stopped
+    depends_on:
+      gateway: { condition: service_healthy }
+
+  # ---------------- the observability tools (ops/) ----------------
+
+  # Collector: ships container logs to Loki, receives traces (OTLP) and forwards them to Tempo.
+  alloy:
+    image: grafana/alloy:v1.22.0
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data", "--server.http.listen-addr=0.0.0.0:12345"]
+    user: "0:0"   # needs to read the Docker socket
+    volumes:
+      - ./ops/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 256m
+    healthcheck:
+      # the image has bash but no curl/wget: check that the OTLP port accepts connections
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/4318"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      - loki
+      - tempo
+
+  # Logs. (The Loki and Tempo images have no shell, so they have no healthcheck.)
+  loki:
+    image: grafana/loki:3.7.10
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./ops/loki:/etc/loki:ro
+    mem_limit: 256m
+
+  # Traces.
+  tempo:
+    image: grafana/tempo:2.10.10
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./ops/tempo:/etc/tempo:ro
+    mem_limit: 256m
+
+  # Metrics: scrapes /metrics on the three services every 5 s.
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=1d
+    volumes:
+      - ./ops/prometheus:/etc/prometheus:ro
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Dashboards and Explore, on http://localhost:3000 (no login).
+  grafana:
+    image: grafana/grafana:13.3.1
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/otzzo-orders.json
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      prometheus: { condition: service_healthy }
+      loki: { condition: service_started }
+      tempo: { condition: service_started }

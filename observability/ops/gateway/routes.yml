@@ -1,0 +1,14 @@
+# Traefik dynamic configuration: which path goes to which service.
+http:
+  routers:
+    orders:
+      rule: PathPrefix(`/orders`)
+      entryPoints:
+        - web
+      service: orders
+
+  services:
+    orders:
+      loadBalancer:
+        servers:
+          - url: http://orders:3000
