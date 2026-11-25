@@ -73,13 +73,14 @@ func getCart(w http.ResponseWriter, r *http.Request) {
 	customerID := r.URL.Query().Get("customerId")
 	ids := []any{"cart_id", cartID, "customer_id", customerID}
 	key := cacheKey(customerID, cartID)
+	slog.InfoContext(ctx, "getCart recieved request for customer: "+customerID+"to access cart: "+cartID, ids...)
 
 	cacheMu.RLock()
 	cart, hit := cache[key]
 	cacheMu.RUnlock()
 
 	if hit {
-		slog.InfoContext(ctx, "cart cache hit key="+key, ids...)
+		slog.InfoContext(ctx, "Looked for cart in cache for key="+key, append(ids, "cart", cart)...)
 	} else {
 		var found bool
 		cart, found = loadFromStore(customerID, cartID)
