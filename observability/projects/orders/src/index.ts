@@ -35,15 +35,8 @@ app.post("/orders", async (c) => {
   const ids = { order_id: orderId, cart_id: cartId, customer_id: customerId };
   log("info", "order received", ids);
 
-  // 1. the cart
-  const cartRes = await callService("cart", `${CART_URL}/carts/${cartId}?customerId=${customerId}`);
-  if (!cartRes.ok) {
-    log("warn", `cart service answered ${cartRes.status}`, ids);
-    return c.json({ error: "cart_not_found" }, 404);
-  }
-  const cart = (await cartRes.json()) as Cart;
-
-  // 2. the customer
+  // 1. the customer
+  log("info", "Calling customers service to retrieve customer info", ids)
   const customerRes = await callService("customers", `${CUSTOMERS_URL}/customers/${customerId}`);
   if (!customerRes.ok) {
     log("warn", `customers service answered ${customerRes.status}`, ids);
@@ -51,11 +44,20 @@ app.post("/orders", async (c) => {
   }
   const customer = (await customerRes.json()) as Customer;
 
+  // 2. the cart
+  log("info", "Calling cart service to retrieve cart information", ids)
+  const cartRes = await callService("cart", `${CART_URL}/carts/${cartId}?customerId=${customerId}`);
+  if (!cartRes.ok) {
+    log("warn", `cart service answered ${cartRes.status}`, ids);
+    return c.json({ error: "cart_not_found" }, 404);
+  }
+  const cart = (await cartRes.json()) as Cart;
+
   // 3. never ship a cart to somebody who does not own it
   if (cart.customerId !== customerId) {
     log("error", "order mismatch: cart owner differs from the customer placing the order", {
       ...ids,
-      cart_owner: cart.customerId,
+      cart_customer_owner: cart.customerId,
     });
     ordersMismatch.inc();
     return c.json({ error: "order_mismatch" }, 500);
