@@ -18,9 +18,10 @@ Traefik has two kinds of configuration, in two files. The folder is mounted read
 - `entryPoints.web` on `:8080` is the public entry point.
 - `entryPoints.ping` on `:8082` with `ping` is only for the container healthcheck (`traefik healthcheck`).
 - `providers.file` loads `routes.yml`.
+- `tracing` sends a span per request to Alloy (OTLP) and adds the `traceparent` header, so the services join the trace.
 - `accessLog` in JSON: one line per request on stdout, which ends up in Loki under `{service="gateway"}`.
 
-`routes.yml` has one router: paths starting with `/orders` go to `http://orders:3000`.
+`routes.yml` has three routers: `/orders` goes to `orders`, `/carts` and `/stock` go to `cart`, `/customers` goes to `customers`.
 
 ## Working with it
 

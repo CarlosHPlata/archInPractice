@@ -1,21 +1,22 @@
 #!/bin/sh
-# Sends orders to the store, like the customers of a real web shop would.
+# Plays the customers of the store: they look at their cart, change it, check
+# their order history, place orders (some as a gift) and sometimes cancel one.
 #
-#   ./ops/traffic/generate-request.sh 3     send 3 random orders, print a summary, exit
-#   ./ops/traffic/generate-request.sh       stream: a small burst of orders every few seconds, forever
-#   ./ops/traffic/generate-request.sh --verbose 3    also print each request and its response
+#   ./ops/traffic/generate-request.sh 5     send 5 random requests, print a summary, exit
+#   ./ops/traffic/generate-request.sh       stream: a small burst of requests every few seconds, forever
+#   ./ops/traffic/generate-request.sh --verbose 5    also print each request and its response
 #
 # The "traffic" container in docker-compose.yml runs the stream mode as soon as
 # the gateway is healthy. Settings (environment variables):
-#   ORDERS_URL   where to send the orders   (default http://localhost:8080/orders)
+#   STORE_URL    the gateway of the store   (default http://localhost:8080)
 #   INTERVAL     seconds between two bursts (default 3)
-#   MAX_BURST    a burst has 1..MAX_BURST orders (default 4)
+#   MAX_BURST    a burst has 1..MAX_BURST requests (default 3)
 #   VERBOSE      1 = same as --verbose (default 0)
 set -u
 
-URL="${ORDERS_URL:-http://localhost:8080/orders}"
+URL="${STORE_URL:-http://localhost:8080}"
 INTERVAL="${INTERVAL:-3}"
-MAX_BURST="${MAX_BURST:-4}"
+MAX_BURST="${MAX_BURST:-3}"
 VERBOSE="${VERBOSE:-0}"
 COUNT=""
 
@@ -33,15 +34,46 @@ rand() {
   echo $((n % $1))
 }
 
-# What the customers of the shop are buying right now. Most visitors are
-# returning customers with their usual cart; a few arrive with a stale link.
-pick_order() {
+# Each customer has one cart.
+pick_customer() {
+  case "$(rand 5)" in
+    0) CUSTOMER=c-1001; CART=cart-7 ;;
+    1) CUSTOMER=c-1002; CART=cart-9 ;;
+    2) CUSTOMER=c-1003; CART=cart-3 ;;
+    3) CUSTOMER=c-1004; CART=cart-12 ;;
+    *) CUSTOMER=c-1005; CART=cart-5 ;;
+  esac
+}
+
+order() { METHOD=POST; REQ_PATH=/orders; BODY="{\"customerId\":\"$1\",\"cartId\":\"$2\"}"; }
+gift()  { METHOD=POST; REQ_PATH=/orders; BODY="{\"customerId\":\"$1\",\"cartId\":\"$2\",\"recipientId\":\"$3\"}"; }
+
+LAST_ORDER="" # id of the last order that was accepted: the next one to be cancelled
+
+# What the customers of the shop are doing right now.
+pick_request() {
+  BODY=""
   r="$(rand 100)"
-  if   [ "$r" -lt 30 ]; then CUSTOMER=c-1001; CART=cart-7
-  elif [ "$r" -lt 55 ]; then CUSTOMER=c-1002; CART=cart-9
-  elif [ "$r" -lt 80 ]; then CUSTOMER=c-1003; CART=cart-3
-  elif [ "$r" -lt 95 ]; then CUSTOMER=c-1002; CART=cart-7
-  else CUSTOMER="c-$((2000 + $(rand 8000)))"; CART="cart-$((1 + $(rand 40)))"
+  if   [ "$r" -lt 20 ]; then order c-1001 cart-7
+  elif [ "$r" -lt 34 ]; then order c-1002 cart-9
+  elif [ "$r" -lt 46 ]; then order c-1005 cart-5
+  elif [ "$r" -lt 52 ]; then order c-1003 cart-3
+  elif [ "$r" -lt 57 ]; then order c-1004 cart-12
+  elif [ "$r" -lt 61 ]; then gift c-1002 cart-9 c-1001
+  elif [ "$r" -lt 64 ]; then gift c-1005 cart-5 c-1001
+  elif [ "$r" -lt 66 ]; then gift c-1001 cart-7 c-1005
+  elif [ "$r" -lt 76 ]; then pick_customer; METHOD=GET; REQ_PATH="/customers/$CUSTOMER/orders"
+  elif [ "$r" -lt 85 ]; then pick_customer; METHOD=GET; REQ_PATH="/carts/$CART?customerId=$CUSTOMER"
+  elif [ "$r" -lt 91 ]; then
+    # only the carts of c-1002 and c-1005 get extras
+    if [ "$(rand 2)" = 0 ]; then CART=cart-9; else CART=cart-5; fi
+    if [ "$(rand 2)" = 0 ]; then SKU=cb-3; else SKU=mg-7; fi
+    METHOD=PUT; REQ_PATH="/carts/$CART/items/$SKU"; BODY="{\"qty\":$(rand 4)}"
+  elif [ "$r" -lt 95 ] && [ -n "$LAST_ORDER" ]; then
+    METHOD=POST; REQ_PATH="/orders/$LAST_ORDER/cancel"; LAST_ORDER=""
+  else
+    # a visitor with a stale link: this customer does not exist
+    order "c-$((2000 + $(rand 8000)))" "cart-$((20 + $(rand 40)))"
   fi
 }
 
@@ -57,14 +89,18 @@ pick_browser() {
 
 sent=0; ok=0; failed=0; other=0
 
-send_order() {
-  pick_order
+send_request() {
+  pick_request
   pick_browser
-  body="{\"customerId\":\"$CUSTOMER\",\"cartId\":\"$CART\"}"
   # -i puts the response headers and body first; -w adds one last line with the numbers
-  output="$(curl -s -i -m 10 -X POST "$URL" \
-    -H 'Content-Type: application/json' -A "$AGENT" -d "$body" \
-    -w '\n%{http_code} %{time_total} %header{x-trace-id}' | tr -d '\r')"
+  if [ -n "$BODY" ]; then
+    output="$(curl -s -i -m 10 -X "$METHOD" "$URL$REQ_PATH" \
+      -H 'Content-Type: application/json' -A "$AGENT" -d "$BODY" \
+      -w '\n%{http_code} %{time_total} %header{x-trace-id}' | tr -d '\r')"
+  else
+    output="$(curl -s -i -m 10 -X "$METHOD" "$URL$REQ_PATH" -A "$AGENT" \
+      -w '\n%{http_code} %{time_total} %header{x-trace-id}' | tr -d '\r')"
+  fi
   result="${output##*
 }"
   response="${output%
@@ -77,12 +113,14 @@ send_order() {
     5*|000) failed=$((failed + 1)) ;;
     *) other=$((other + 1)) ;;
   esac
-  echo "$(date +%H:%M:%S)  $status  $CUSTOMER $CART  ${seconds}s  trace_id=${trace_id:--}"
+  if [ "$status" = "201" ]; then
+    LAST_ORDER="$(printf '%s' "$response" | sed -n 's/.*"orderId":"\([^"]*\)".*/\1/p' | head -n 1)"
+  fi
+  echo "$(date +%H:%M:%S)  $status  $METHOD $REQ_PATH ${BODY:+$BODY }${seconds}s  trace_id=${trace_id:--}"
   if [ "$VERBOSE" = "1" ]; then
-    echo "  > POST $URL"
-    echo "  > Content-Type: application/json"
+    echo "  > $METHOD $URL$REQ_PATH"
     echo "  > User-Agent: $AGENT"
-    echo "  > $body"
+    [ -n "$BODY" ] && echo "  > $BODY"
     if [ -n "$response" ]; then
       printf '%s\n' "$response" | sed '/^$/d; s/^/  < /'
     else
@@ -97,24 +135,24 @@ summary() {
 }
 
 if [ -n "$COUNT" ]; then
-  # manual mode: N orders, then stop
+  # manual mode: N requests, then stop
   i=0
   while [ "$i" -lt "$COUNT" ]; do
-    send_order
+    send_request
     i=$((i + 1))
   done
   summary
   exit 0
 fi
 
-# stream mode: a burst of 1..MAX_BURST orders every INTERVAL seconds
+# stream mode: a burst of 1..MAX_BURST requests every INTERVAL seconds
 trap 'summary; exit 0' INT TERM
-echo "sending orders to $URL: 1 to $MAX_BURST every ${INTERVAL}s (stop with Ctrl+C or: docker compose stop traffic)"
+echo "sending requests to $URL: 1 to $MAX_BURST every ${INTERVAL}s (stop with Ctrl+C or: docker compose stop traffic)"
 while true; do
   burst=$((1 + $(rand "$MAX_BURST")))
   i=0
   while [ "$i" -lt "$burst" ]; do
-    send_order
+    send_request
     i=$((i + 1))
   done
   sleep "$INTERVAL"

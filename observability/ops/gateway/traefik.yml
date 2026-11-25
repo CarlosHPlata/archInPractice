@@ -19,3 +19,11 @@ log:
 
 accessLog:
   format: json
+
+# Every request that enters the store gets a trace id here. The services join
+# that trace and write its id in each of their log lines.
+tracing:
+  serviceName: gateway
+  otlp:
+    http:
+      endpoint: http://alloy:4318/v1/traces

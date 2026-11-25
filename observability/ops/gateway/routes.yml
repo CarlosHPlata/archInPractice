@@ -6,9 +6,27 @@ http:
       entryPoints:
         - web
       service: orders
+    cart:
+      rule: PathPrefix(`/carts`) || PathPrefix(`/stock`)
+      entryPoints:
+        - web
+      service: cart
+    customers:
+      rule: PathPrefix(`/customers`)
+      entryPoints:
+        - web
+      service: customers
 
   services:
     orders:
       loadBalancer:
         servers:
           - url: http://orders:3000
+    cart:
+      loadBalancer:
+        servers:
+          - url: http://cart:8080
+    customers:
+      loadBalancer:
+        servers:
+          - url: http://customers:8000
