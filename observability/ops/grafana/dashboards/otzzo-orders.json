@@ -1,14 +1,15 @@
 {
   "uid": "otzzo-orders",
-  "title": "Otzzo - Orders",
+  "title": "Otzzo - Store",
   "tags": [
     "otzzo",
-    "RED"
+    "RED",
+    "business"
   ],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 41,
-  "version": 1,
+  "version": 4,
   "refresh": "5s",
   "time": {
     "from": "now-15m",
@@ -200,9 +201,9 @@
     },
     {
       "id": 4,
-      "type": "stat",
-      "title": "orders_mismatch_total",
-      "description": "Orders rejected because the cart did not belong to the customer.",
+      "type": "timeseries",
+      "title": "Checkouts by outcome",
+      "description": "Checkouts (POST /orders) in the selected time range: confirmed, or the error code answered to the client.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -210,12 +211,128 @@
       "gridPos": {
         "x": 0,
         "y": 8,
-        "w": 6,
-        "h": 7
+        "w": 8,
+        "h": 8
       },
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (increase(orders_checkouts_total[$__range]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Confirmed checkouts in the past hour",
+      "description": "Orders confirmed in the last 60 minutes. Does not follow the time picker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 4,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "round(sum(increase(orders_checkouts_total{outcome=\"confirmed\"}[1h])))",
+          "legendFormat": "confirmed"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Errors in the past hour",
+      "description": "Requests answered with a 5xx status in the last 60 minutes, all services together. Does not follow the time picker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 4,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -235,6 +352,8 @@
       "options": {
         "colorMode": "background",
         "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -248,25 +367,130 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(orders_mismatch_total)",
-          "legendFormat": "mismatches"
+          "instant": true,
+          "expr": "round(sum(increase(http_requests_total{status=~\"5..\"}[1h])))",
+          "legendFormat": "errors"
         }
       ]
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "orders_mismatch_total over time",
-      "description": "The counter only goes up: every step is one rejected order.",
+      "title": "Answers with an error status (4xx and 5xx)",
+      "description": "Requests per second answered with a 4xx or 5xx status, per service and status.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 6,
+        "x": 16,
         "y": 8,
-        "w": 18,
-        "h": 7
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (service, status) (rate(http_requests_total{status=~\"[45]..\"}[1m]))",
+          "legendFormat": "{{service}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Discount given, by loyalty tier of the buyer",
+      "description": "Money given as loyalty discount in confirmed orders, in the selected time range. The standard tier has no discount.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (buyer_tier) (increase(orders_discount_amount_total[$__range]))",
+          "legendFormat": "{{buyer_tier}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Smart TV 55\": units sold and units reserved",
+      "description": "In the selected time range: units of tv-55 in confirmed orders (orders service, cancellations subtracted) and units taken from the stock (cart service, releases subtracted).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
       },
       "fieldConfig": {
         "defaults": {
@@ -299,8 +523,86 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(orders_mismatch_total)",
-          "legendFormat": "mismatches"
+          "expr": "sum(increase(orders_units_sold_total{sku=\"tv-55\"}[$__range])) - (sum(increase(orders_units_cancelled_total{sku=\"tv-55\"}[$__range])) or vector(0))",
+          "legendFormat": "sold (orders)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(stock_units_reserved_total{sku=\"tv-55\"}[$__range])) - (sum(increase(stock_units_released_total{sku=\"tv-55\"}[$__range])) or vector(0))",
+          "legendFormat": "reserved (cart)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(stock_units_available{sku=\"tv-55\"})",
+          "legendFormat": "available in stock"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Order history: orders listed per request",
+      "description": "Average number of orders in one order-history answer (customers service), next to the average number of orders a customer has in the order store (orders service).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(order_history_orders_returned_total[2m])) / sum(rate(order_history_requests_total[2m]))",
+          "legendFormat": "orders listed per history request"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "avg(orders_stored)",
+          "legendFormat": "orders per customer in the store"
         }
       ]
     },
@@ -314,7 +616,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 24,
         "w": 24,
         "h": 12
       },

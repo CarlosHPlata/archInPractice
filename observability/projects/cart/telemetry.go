@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -68,6 +70,13 @@ var (
 		Name: "http_request_duration_seconds", Help: "HTTP request duration.",
 		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5},
 	}, []string{"method", "route"})
+	// business metrics: what happens to the stock
+	stockReserved = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stock_units_reserved_total", Help: "Units taken from the stock by reservations.",
+	}, []string{"sku"})
+	stockReleased = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stock_units_released_total", Help: "Units given back to the stock by released reservations.",
+	}, []string{"sku"})
 	registry = prometheus.NewRegistry()
 )
 
@@ -79,7 +88,7 @@ func metricsHandler() http.Handler {
 
 func setupTelemetry() (shutdown func()) {
 	setupLogs()
-	registry.MustRegister(httpRequests, httpDuration)
+	registry.MustRegister(httpRequests, httpDuration, stockReserved, stockReleased)
 
 	// The endpoint comes from OTEL_EXPORTER_OTLP_ENDPOINT (see docker-compose.yml).
 	exporter, err := otlptracehttp.New(context.Background())
@@ -120,9 +129,11 @@ func instrument(route string, next http.HandlerFunc) http.Handler {
 		var span trace.Span
 		if trace.SpanContextFromContext(ctx).IsValid() {
 			ctx, span = otel.Tracer(serviceName).Start(ctx, r.Method+" "+route, trace.WithSpanKind(trace.SpanKindServer))
+			w.Header().Set("x-trace-id", traceID(ctx))
 		}
 
 		next(rec, r.WithContext(ctx))
+		slog.InfoContext(ctx, fmt.Sprintf("request finished: %s %s answered %d in %d ms", r.Method, r.URL.Path, rec.status, time.Since(start).Milliseconds()))
 
 		if span != nil {
 			span.SetAttributes(attribute.String("http.request.method", r.Method), attribute.String("http.route", route),
@@ -135,4 +146,38 @@ func instrument(route string, next http.HandlerFunc) http.Handler {
 		httpRequests.WithLabelValues(r.Method, route, strconv.Itoa(rec.status)).Inc()
 		httpDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
 	})
+}
+
+// ---------- outgoing calls: forward the trace to the next service ----------
+
+var httpClient = &http.Client{Timeout: 2 * time.Second}
+
+// getJSON GETs another service and decodes its JSON answer into out. Inside a
+// trace it adds a client span and the traceparent header.
+func getJSON(ctx context.Context, name, url string, out any) (status int, err error) {
+	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	if trace.SpanContextFromContext(ctx).IsValid() {
+		spanCtx, span := otel.Tracer(serviceName).Start(ctx, "GET "+name, trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithAttributes(attribute.String("url.full", url)))
+		defer func() {
+			span.SetAttributes(attribute.Int("http.response.status_code", status))
+			if err != nil || status >= 500 {
+				span.SetStatus(codes.Error, http.StatusText(status))
+			}
+			span.End()
+		}()
+		otel.GetTextMapPropagator().Inject(spanCtx, propagation.HeaderCarrier(req.Header)) // writes "traceparent"
+	}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusOK {
+		err = json.NewDecoder(res.Body).Decode(out)
+	}
+	return res.StatusCode, err
 }
