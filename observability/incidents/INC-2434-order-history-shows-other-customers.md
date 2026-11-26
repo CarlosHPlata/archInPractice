@@ -21,13 +21,13 @@ A customer sent a screenshot of the *My orders* page of the app: it lists a 55" 
 macOS, Linux, Git Bash:
 
 ```bash
-curl -i http://localhost:8080/customers/c-1002/orders
+curl -i https://apps.tail9a6ddb.ts.net/customers/c-1002/orders
 ```
 
 Windows PowerShell:
 
 ```powershell
-curl.exe -i http://localhost:8080/customers/c-1002/orders
+curl.exe -i https://apps.tail9a6ddb.ts.net/customers/c-1002/orders
 ```
 
 | | |
