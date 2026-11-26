@@ -39,9 +39,10 @@ loki.source.docker "containers" {
   forward_to = [loki.write.default.receiver]
 }
 
+// LOKI_URL is the base address of Loki; without it, the compose service name.
 loki.write "default" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    url = coalesce(sys.env("LOKI_URL"), "http://loki:3100") + "/loki/api/v1/push"
   }
 }
 
@@ -69,9 +70,11 @@ otelcol.processor.batch "default" {
   }
 }
 
+// TEMPO_OTLP_ENDPOINT is host:port of Tempo's OTLP gRPC receiver; without it,
+// the compose service name.
 otelcol.exporter.otlp "tempo" {
   client {
-    endpoint = "tempo:4317"
+    endpoint = coalesce(sys.env("TEMPO_OTLP_ENDPOINT"), "tempo:4317")
 
     tls {
       insecure = true
