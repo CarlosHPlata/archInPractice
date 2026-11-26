@@ -20,19 +20,37 @@ The stock of the 55" Smart TV (`tv-55`) goes down about twice as fast as we sell
 
 macOS, Linux, Git Bash:
 
+1. check stock
 ```bash
 curl -s https://apps.tail9a6ddb.ts.net/stock/tv-55
+```
+
+2. try to reserve a tv
+```bash
 curl -i -X POST https://apps.tail9a6ddb.ts.net/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerId":"c-1001","cartId":"cart-7"}'
+```
+
+3. check stock again
+```bash
 curl -s https://apps.tail9a6ddb.ts.net/stock/tv-55
 ```
 
 Windows PowerShell:
 
+1. check stock
 ```powershell
 curl.exe -s https://apps.tail9a6ddb.ts.net/stock/tv-55
+```
+
+2. try to reserve a tv
+```powershell
 curl.exe -i -X POST https://apps.tail9a6ddb.ts.net/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1001\",\"cartId\":\"cart-7\"}'
+```
+
+3. check stock again
+```powershell
 curl.exe -s https://apps.tail9a6ddb.ts.net/stock/tv-55
 ```
 
