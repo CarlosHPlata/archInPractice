@@ -5,11 +5,16 @@ name: "Observability: push images"
 #   the observability tools  observer-alloy, observer-grafana, observer-prometheus,
 #                            observer-tempo, observer-traffic (the upstream image
 #                            plus its files in ops/)
-# All of them share one version, so a change to a config in ops/ needs a release too.
+# A change to a config in ops/ needs a release too.
 #
 # Runs only when a version tag is pushed, and only if the tagged commit is on master:
 #   git tag v1.2.3 && git push origin v1.2.3
-# v1.2.3 is pushed as 1.2.3, 1.2, 1 and latest.
+#
+# The version is one for the whole repository, but a release only builds and pushes
+# the images whose folder changed since the previous release
+# (observability/scripts/changed-images.sh). Those are pushed as 1.2.3, 1.2, 1 and
+# latest; an image that did not change keeps the version and the "latest" it had,
+# so its version numbers have gaps.
 on:
   push:
     tags:
@@ -32,10 +37,6 @@ jobs:
       REGISTRY_HOST: gateway.tail9a6ddb.ts.net   # Tailscale MagicDNS name
       REGISTRY: gateway.tail9a6ddb.ts.net:5000
       IMAGE_PREFIX: observer-
-      # Folders under observability/ with a Dockerfile; the image is named after the folder.
-      IMAGE_DIRS: >-
-        projects/cart projects/customers projects/orders
-        ops/alloy ops/grafana ops/prometheus ops/tempo ops/traffic
 
     steps:
       - name: "Checkout"
@@ -52,9 +53,38 @@ jobs:
             exit 1
           fi
 
+      # An image is named after its folder: observability/ops/tempo is observer-tempo.
+      # Every later step is skipped when no image changed.
+      - name: "Find the images that changed"
+        id: changed
+        shell: bash
+        run: |
+          dirs=$(bash observability/scripts/changed-images.sh "$GITHUB_SHA" "$GITHUB_REF_NAME")
+          if [[ -z "$dirs" ]]; then
+            echo "::notice::No image changed since the previous release: nothing to build or push."
+          fi
+          {
+            echo "dirs<<END_OF_LIST"
+            [[ -z "$dirs" ]] || echo "$dirs"
+            echo "END_OF_LIST"
+            echo "images<<END_OF_LIST"
+            for dir in $dirs; do
+              echo "$REGISTRY/$IMAGE_PREFIX${dir##*/}"
+            done
+            echo "END_OF_LIST"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Images in $GITHUB_REF_NAME"
+            for dir in $dirs; do
+              echo "- \`$IMAGE_PREFIX${dir##*/}\` (\`$dir\`)"
+            done
+            [[ -n "$dirs" ]] || echo "None: no image changed since the previous release."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # The registry speaks plain HTTP inside the tailnet (WireGuard encrypts the traffic).
       # Merged into the existing daemon.json, if any, instead of replacing it.
       - name: "Allow the tailnet registry over HTTP"
+        if: steps.changed.outputs.dirs != ''
         shell: bash   # adds pipefail: a jq error must fail the step
         run: |
           current=$(sudo cat /etc/docker/daemon.json 2>/dev/null || true)
@@ -66,24 +96,18 @@ jobs:
       # The "docker" driver builds and pushes through the daemon, which reads daemon.json.
       # The default docker-container driver runs BuildKit in its own container and ignores it.
       - name: "Set up Docker Buildx"
+        if: steps.changed.outputs.dirs != ''
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           driver: docker
 
-      # One tag list for all the images; the build step picks each image's lines.
+      # One tag list for the images of this release; the build step picks each image's lines.
       - name: "Docker metadata"
         id: meta
+        if: steps.changed.outputs.dirs != ''
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}cart
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}customers
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}orders
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}alloy
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}grafana
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}prometheus
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}tempo
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}traffic
+          images: ${{ steps.changed.outputs.images }}
           # "latest" is added automatically for stable versions, never for alpha/beta.
           # No major-only tag below 1.0: a "0" tag would span breaking changes.
           tags: |
@@ -96,8 +120,10 @@ jobs:
       # able to reach it. Every image is built before anything is pushed, so a broken
       # build can't leave the registry with a half-released version.
       - name: "Build images"
+        if: steps.changed.outputs.dirs != ''
         shell: bash
         env:
+          DIRS: ${{ steps.changed.outputs.dirs }}
           TAGS: ${{ steps.meta.outputs.tags }}
           LABELS: ${{ steps.meta.outputs.labels }}
         run: |
@@ -106,7 +132,7 @@ jobs:
             [[ -n "$label" ]] && label_args+=(--label "$label")
           done <<< "$LABELS"
 
-          for dir in $IMAGE_DIRS; do
+          for dir in $DIRS; do
             image="$REGISTRY/$IMAGE_PREFIX${dir##*/}"
             tag_args=()
             while IFS= read -r tag; do
@@ -120,11 +146,12 @@ jobs:
             echo "::group::Build $image"
             docker buildx build --load --provenance=false \
               "${tag_args[@]}" "${label_args[@]}" \
-              "observability/$dir"
+              "$dir"
             echo "::endgroup::"
           done
 
       - name: "Join the tailnet"
+        if: steps.changed.outputs.dirs != ''
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -134,6 +161,7 @@ jobs:
 
       # Passes the secrets as inputs, not pasted into a script; logs out when the job ends.
       - name: "Login to registry"
+        if: steps.changed.outputs.dirs != ''
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -141,8 +169,11 @@ jobs:
           password: ${{ secrets.REGISTRY_PASS }}
 
       - name: "Push images"
+        if: steps.changed.outputs.dirs != ''
         shell: bash
+        env:
+          DIRS: ${{ steps.changed.outputs.dirs }}
         run: |
-          for dir in $IMAGE_DIRS; do
+          for dir in $DIRS; do
             docker push --all-tags "$REGISTRY/$IMAGE_PREFIX${dir##*/}"
           done
