@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Tags HEAD with the next release version and pushes the tag to origin; the tag
-# push triggers the "Observability: push images" workflow, which builds
-# observer-cart, observer-customers and observer-orders and pushes them to the
-# tailnet registry.
+# push triggers the "Observability: push images" workflow, which builds the
+# observer-* images (the three services and the observability tools with their
+# configuration from ops/) and pushes them to the tailnet registry.
 #
 #   observability/scripts/bump.sh                 checks, menu, confirmation
 #   observability/scripts/bump.sh --minor -y      checks only, no questions

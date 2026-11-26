@@ -1,0 +1,19 @@
+# prometheus.yml for the Shrine deployment (built into the observer-prometheus
+# image). Same as prometheus.yml except for the targets: under Shrine a
+# container is reached as <team>.<name>, and the team is "observability".
+# Prometheus cannot read targets from environment variables, hence this copy.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: otzzo
+    static_configs:
+      - targets: ["observability.orders:3000"]
+        labels:
+          service: orders
+      - targets: ["observability.cart:8080"]
+        labels:
+          service: cart
+      - targets: ["observability.customers:8000"]
+        labels:
+          service: customers

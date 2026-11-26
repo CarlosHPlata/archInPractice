@@ -1,7 +1,11 @@
 name: "Observability: push images"
 
-# Builds the three Otzzo services and pushes them to the registry inside the tailnet,
-# as observer-cart, observer-customers and observer-orders.
+# Builds the Otzzo images and pushes them to the registry inside the tailnet:
+#   the three services       observer-cart, observer-customers, observer-orders
+#   the observability tools  observer-alloy, observer-grafana, observer-prometheus,
+#                            observer-tempo, observer-traffic (the upstream image
+#                            plus its files in ops/)
+# All of them share one version, so a change to a config in ops/ needs a release too.
 #
 # Runs only when a version tag is pushed, and only if the tagged commit is on master:
 #   git tag v1.2.3 && git push origin v1.2.3
@@ -28,7 +32,10 @@ jobs:
       REGISTRY_HOST: gateway.tail9a6ddb.ts.net   # Tailscale MagicDNS name
       REGISTRY: gateway.tail9a6ddb.ts.net:5000
       IMAGE_PREFIX: observer-
-      SERVICES: cart customers orders
+      # Folders under observability/ with a Dockerfile; the image is named after the folder.
+      IMAGE_DIRS: >-
+        projects/cart projects/customers projects/orders
+        ops/alloy ops/grafana ops/prometheus ops/tempo ops/traffic
 
     steps:
       - name: "Checkout"
@@ -63,7 +70,7 @@ jobs:
         with:
           driver: docker
 
-      # One tag list for the three images; the build step picks each service's lines.
+      # One tag list for all the images; the build step picks each image's lines.
       - name: "Docker metadata"
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -72,6 +79,11 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}cart
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}customers
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}orders
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}alloy
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}grafana
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}prometheus
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}tempo
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}traffic
           # "latest" is added automatically for stable versions, never for alpha/beta.
           # No major-only tag below 1.0: a "0" tag would span breaking changes.
           tags: |
@@ -81,7 +93,7 @@ jobs:
 
       # Built before joining the tailnet: the builds install third-party dependencies
       # (go mod download, pip install, npm ci), and their install scripts shouldn't be
-      # able to reach it. All three are built before anything is pushed, so a broken
+      # able to reach it. Every image is built before anything is pushed, so a broken
       # build can't leave the registry with a half-released version.
       - name: "Build images"
         shell: bash
@@ -94,8 +106,8 @@ jobs:
             [[ -n "$label" ]] && label_args+=(--label "$label")
           done <<< "$LABELS"
 
-          for service in $SERVICES; do
-            image="$REGISTRY/$IMAGE_PREFIX$service"
+          for dir in $IMAGE_DIRS; do
+            image="$REGISTRY/$IMAGE_PREFIX${dir##*/}"
             tag_args=()
             while IFS= read -r tag; do
               [[ "$tag" == "$image:"* ]] && tag_args+=(--tag "$tag")
@@ -108,7 +120,7 @@ jobs:
             echo "::group::Build $image"
             docker buildx build --load --provenance=false \
               "${tag_args[@]}" "${label_args[@]}" \
-              "observability/projects/$service"
+              "observability/$dir"
             echo "::endgroup::"
           done
 
@@ -131,6 +143,6 @@ jobs:
       - name: "Push images"
         shell: bash
         run: |
-          for service in $SERVICES; do
-            docker push --all-tags "$REGISTRY/$IMAGE_PREFIX$service"
+          for dir in $IMAGE_DIRS; do
+            docker push --all-tags "$REGISTRY/$IMAGE_PREFIX${dir##*/}"
           done
