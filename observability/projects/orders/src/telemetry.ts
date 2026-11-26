@@ -28,9 +28,43 @@ export function traceId(): string {
 // ---------- logs: one JSON object per line on stdout ----------
 
 export function log(level: "info" | "warn" | "error", msg: string, fields: Record<string, unknown> = {}): void {
-  const line = { ts: new Date().toISOString(), level, service: SERVICE, msg, trace_id: traceId(), ...fields };
-  process.stdout.write(JSON.stringify(line) + "\n");
+  const line = JSON.stringify({ ts: new Date().toISOString(), level, service: SERVICE, msg, trace_id: traceId(), ...fields });
+  process.stdout.write(line + "\n");
+  pushLog(line);
 }
+
+// Where nothing can read the stdout of the containers, LOG_PUSH_URL names a
+// Loki push endpoint (Alloy's) and every line is also sent there, once a
+// second, with the label "service". Without the variable nothing is sent.
+// A line that cannot be delivered is dropped: logging never fails a request.
+const LOG_PUSH_URL = process.env.LOG_PUSH_URL;
+const MAX_PENDING_LOGS = 5000;
+let pendingLogs: [string, string][] = [];
+let logSequence = 0;
+
+function pushLog(line: string): void {
+  if (!LOG_PUSH_URL || pendingLogs.length >= MAX_PENDING_LOGS) return;
+  // Loki wants nanoseconds; the sequence keeps lines of the same millisecond in order.
+  logSequence = (logSequence + 1) % 1_000_000;
+  pendingLogs.push([`${Date.now()}${String(logSequence).padStart(6, "0")}`, line]);
+}
+
+async function flushLogs(): Promise<void> {
+  if (!LOG_PUSH_URL || pendingLogs.length === 0) return;
+  const values = pendingLogs;
+  pendingLogs = [];
+  try {
+    await fetch(LOG_PUSH_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ streams: [{ stream: { service: SERVICE }, values }] }),
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {
+    // dropped, see above
+  }
+}
+if (LOG_PUSH_URL) setInterval(flushLogs, 1000).unref();
 
 // ---------- metrics: exposed on /metrics ----------
 

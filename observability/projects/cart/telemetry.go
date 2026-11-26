@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -45,8 +47,57 @@ func traceID(ctx context.Context) string {
 	return "-"
 }
 
+// Where nothing can read the stdout of the containers, LOG_PUSH_URL names a
+// Loki push endpoint (Alloy's) and every line is also sent there, once a
+// second, with the label "service". Without the variable nothing is sent.
+// A line that cannot be delivered is dropped: logging never fails a request.
+type logPusher struct {
+	url     string
+	pending chan [2]string // timestamp in nanoseconds, line
+}
+
+// Write gets one complete line per call from the slog handler.
+func (p *logPusher) Write(line []byte) (int, error) {
+	entry := [2]string{strconv.FormatInt(time.Now().UnixNano(), 10), strings.TrimRight(string(line), "\n")}
+	select {
+	case p.pending <- entry:
+	default: // full: dropped
+	}
+	return len(line), nil
+}
+
+func (p *logPusher) flushForever() {
+	client := &http.Client{Timeout: 2 * time.Second}
+	for range time.Tick(time.Second) {
+		values := [][2]string{}
+		for more := true; more; {
+			select {
+			case entry := <-p.pending:
+				values = append(values, entry)
+			default:
+				more = false
+			}
+		}
+		if len(values) == 0 {
+			continue
+		}
+		body, _ := json.Marshal(map[string]any{"streams": []any{map[string]any{
+			"stream": map[string]string{"service": serviceName}, "values": values,
+		}}})
+		if res, err := client.Post(p.url, "application/json", bytes.NewReader(body)); err == nil {
+			res.Body.Close()
+		}
+	}
+}
+
 func setupLogs() {
-	json := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	var out io.Writer = os.Stdout
+	if url := os.Getenv("LOG_PUSH_URL"); url != "" {
+		pusher := &logPusher{url: url, pending: make(chan [2]string, 5000)}
+		go pusher.flushForever()
+		out = io.MultiWriter(os.Stdout, pusher)
+	}
+	json := slog.NewJSONHandler(out, &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			switch a.Key {
 			case slog.TimeKey:
