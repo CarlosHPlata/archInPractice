@@ -21,19 +21,19 @@ The stock of the 55" Smart TV (`tv-55`) goes down about twice as fast as we sell
 macOS, Linux, Git Bash:
 
 ```bash
-curl -s http://localhost:8080/stock/tv-55
-curl -i -X POST http://localhost:8080/orders \
+curl -s https://apps.tail9a6ddb.ts.net/stock/tv-55
+curl -i -X POST https://apps.tail9a6ddb.ts.net/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerId":"c-1001","cartId":"cart-7"}'
-curl -s http://localhost:8080/stock/tv-55
+curl -s https://apps.tail9a6ddb.ts.net/stock/tv-55
 ```
 
 Windows PowerShell:
 
 ```powershell
-curl.exe -s http://localhost:8080/stock/tv-55
-curl.exe -i -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1001\",\"cartId\":\"cart-7\"}'
-curl.exe -s http://localhost:8080/stock/tv-55
+curl.exe -s https://apps.tail9a6ddb.ts.net/stock/tv-55
+curl.exe -i -X POST https://apps.tail9a6ddb.ts.net/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1001\",\"cartId\":\"cart-7\"}'
+curl.exe -s https://apps.tail9a6ddb.ts.net/stock/tv-55
 ```
 
 | | |
@@ -45,7 +45,6 @@ The response has an `x-trace-id` header. That trace id is your starting point.
 
 ## Notes
 
-- The traffic generator also buys TVs, so the stock moves while you test. Pause it with `docker compose stop traffic` for a clean count.
 - The restock job refills the shelves every 2 minutes.
 - Nothing is logged at level `error` for these orders.
 
