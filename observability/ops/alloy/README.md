@@ -34,6 +34,10 @@ Traces:
 
 In `docker-compose.yml` the container runs as root and mounts `/var/run/docker.sock` read-only, which is what lets it see the other containers and their logs. The services find it through `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318`.
 
+## Without the Docker socket
+
+Reading the stdout of other containers needs the Docker socket. Where a container cannot have it (the Shrine deployment), the `observer-alloy` image runs `config.shrine.alloy` instead: the logs part is a `loki.source.api` component, a Loki push endpoint on port `3500`, and each service sends its own lines there when `LOG_PUSH_URL` is set. The lines and the `service` label are the same, so the queries do not change. The access log of the gateway is not collected in that deployment.
+
 ## Working with it
 
 ```

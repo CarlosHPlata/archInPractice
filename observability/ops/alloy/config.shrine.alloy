@@ -1,0 +1,59 @@
+// config.alloy for the Shrine deployment (built into the observer-alloy image).
+// Same two jobs as config.alloy, but the logs arrive in another way: a
+// container there cannot read the Docker socket, so Alloy cannot pick up the
+// stdout of the others. The services push their lines here instead
+// (LOG_PUSH_URL in each of them).
+
+// ---------- 1. logs ----------
+
+// A Loki push endpoint: POST http://<alloy>:3500/loki/api/v1/push. Each
+// service sends its lines with one label, "service", as in config.alloy.
+loki.source.api "services" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = 3500
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+// LOKI_URL is the base address of Loki.
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_URL") + "/loki/api/v1/push"
+  }
+}
+
+// ---------- 2. traces ----------
+
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  timeout = "1s"
+
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+// TEMPO_OTLP_ENDPOINT is host:port of Tempo's OTLP gRPC receiver.
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = sys.env("TEMPO_OTLP_ENDPOINT")
+
+    tls {
+      insecure = true
+    }
+  }
+}

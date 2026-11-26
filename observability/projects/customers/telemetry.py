@@ -2,7 +2,10 @@
 metrics and OpenTelemetry tracing. The business code is in main.py."""
 import asyncio
 import json
+import os
+import queue
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -42,8 +45,47 @@ def log(level: str, msg: str, **fields) -> None:
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "level": level, "service": SERVICE, "msg": msg, "trace_id": trace_id(), **fields,
     }
-    sys.stdout.write(json.dumps(line) + "\n")
+    text = json.dumps(line)
+    sys.stdout.write(text + "\n")
     sys.stdout.flush()
+    _push_log(text)
+
+
+# Where nothing can read the stdout of the containers, LOG_PUSH_URL names a
+# Loki push endpoint (Alloy's) and every line is also sent there, once a
+# second, with the label "service". Without the variable nothing is sent.
+# A line that cannot be delivered is dropped: logging never fails a request.
+LOG_PUSH_URL = os.environ.get("LOG_PUSH_URL")
+_pending_logs: queue.Queue = queue.Queue(maxsize=5000)
+
+
+def _push_log(text: str) -> None:
+    if not LOG_PUSH_URL:
+        return
+    try:
+        _pending_logs.put_nowait([str(time.time_ns()), text])  # Loki wants nanoseconds
+    except queue.Full:
+        pass
+
+
+def _flush_logs_forever() -> None:
+    while True:
+        time.sleep(1)
+        values = []
+        while not _pending_logs.empty():
+            values.append(_pending_logs.get_nowait())
+        if not values:
+            continue
+        body = json.dumps({"streams": [{"stream": {"service": SERVICE}, "values": values}]}).encode()
+        request = urllib.request.Request(LOG_PUSH_URL, data=body, headers={"content-type": "application/json"})
+        try:
+            urllib.request.urlopen(request, timeout=2).close()
+        except (urllib.error.URLError, TimeoutError, OSError):
+            pass  # dropped, see above
+
+
+if LOG_PUSH_URL:
+    threading.Thread(target=_flush_logs_forever, daemon=True).start()
 
 
 # ---------- metrics: exposed on /metrics ----------
