@@ -21,7 +21,7 @@ The daily revenue report does not match the price list. Some orders that are sen
 macOS, Linux, Git Bash:
 
 ```bash
-curl -i -X POST http://localhost:8080/orders \
+curl -i -X POST https://apps.tail9a6ddb.ts.net/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerId":"c-1002","cartId":"cart-9","recipientId":"c-1001"}'
 ```
@@ -29,7 +29,7 @@ curl -i -X POST http://localhost:8080/orders \
 Windows PowerShell:
 
 ```powershell
-curl.exe -i -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1002\",\"cartId\":\"cart-9\",\"recipientId\":\"c-1001\"}'
+curl.exe -i -X POST https://apps.tail9a6ddb.ts.net/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1002\",\"cartId\":\"cart-9\",\"recipientId\":\"c-1001\"}'
 ```
 
 | | |

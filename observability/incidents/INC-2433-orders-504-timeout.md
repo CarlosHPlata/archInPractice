@@ -21,7 +21,7 @@ Part of the orders take about one second and then fail with `504 Gateway Timeout
 macOS, Linux, Git Bash:
 
 ```bash
-curl -i -X POST http://localhost:8080/orders \
+curl -i -X POST https://apps.tail9a6ddb.ts.net/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerId":"c-1003","cartId":"cart-3"}'
 ```
@@ -29,7 +29,7 @@ curl -i -X POST http://localhost:8080/orders \
 Windows PowerShell:
 
 ```powershell
-curl.exe -i -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1003\",\"cartId\":\"cart-3\"}'
+curl.exe -i -X POST https://apps.tail9a6ddb.ts.net/orders -H "Content-Type: application/json" -d '{\"customerId\":\"c-1003\",\"cartId\":\"cart-3\"}'
 ```
 
 | | |

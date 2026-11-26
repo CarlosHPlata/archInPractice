@@ -111,15 +111,24 @@ flowchart LR
     you -->|opens| grafana
 ```
 
-## Start
+## Where it runs
 
-You need Docker Desktop (about 1 GB of free RAM for the stack) and nothing else.
+The store is deployed and reachable over the tailnet (you need to be connected to the VPN):
+
+- Store: <https://apps.tail9a6ddb.ts.net> (`/orders`, `/carts`, `/stock`, `/customers`)
+- Grafana: <https://apps.tail9a6ddb.ts.net/grafana> (no login)
+
+The requests in the incident tickets use these addresses.
+
+### Run it on your machine
+
+You can also run the whole stack locally. You need Docker Desktop (about 1 GB of free RAM for the stack) and nothing else.
 
 ```
 docker compose up --build
 ```
 
-The first start downloads and builds images, so it takes a few minutes. It is ready when `gateway` is running. Then open Grafana at <http://localhost:3000> (no login).
+The first start downloads and builds images, so it takes a few minutes. It is ready when `gateway` is running. Then the store is at <http://localhost:8080> and Grafana at <http://localhost:3000> (no login); use `http://localhost:8080` in place of `https://apps.tail9a6ddb.ts.net` in the requests of the tickets.
 
 To stop and delete everything: `docker compose down`.
 
